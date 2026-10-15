@@ -106,6 +106,37 @@ public sealed class OrderServiceCheckoutTests
         Assert.Empty(await f.Context.Orders.ToListAsync());
     }
 
+    [Fact]
+    public async Task CancelOrderRestoresStockAndBlocksDuplicateCancellation()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var order = await f.Service.CheckoutAsync(7, new CheckoutDto { AddressID = 11, PaymentMethod = "COD" });
+
+        var cancelled = await f.Service.CancelOrderAsync(7, order.OrderID);
+        Assert.Equal("CANCELLED", cancelled.OrderStatus);
+
+        var dbOrder = await f.Context.Orders.FindAsync(order.OrderID);
+        Assert.NotNull(dbOrder);
+        Assert.Equal("CANCELLED", dbOrder.OrderStatus);
+        Assert.NotNull(dbOrder.CancelledAt);
+
+        // Verify duplicate cancellation throws DomainConflictException
+        await Assert.ThrowsAsync<DomainConflictException>(() => f.Service.CancelOrderAsync(7, order.OrderID));
+
+        // Verify transactions were recorded
+        var transactions = await f.Context.InventoryTransactions.Where(t => t.TransactionType == "CANCEL_ORDER").ToListAsync();
+        Assert.Equal(2, transactions.Count);
+    }
+
+    [Fact]
+    public async Task CancelForeignOrderThrowsResourceNotFound()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var order = await f.Service.CheckoutAsync(7, new CheckoutDto { AddressID = 11, PaymentMethod = "COD" });
+
+        await Assert.ThrowsAsync<ResourceNotFoundException>(() => f.Service.CancelOrderAsync(8, order.OrderID));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection connection;
@@ -156,6 +187,11 @@ public sealed class OrderServiceCheckoutTests
                     OrderDetailID INTEGER PRIMARY KEY AUTOINCREMENT, OrderID INTEGER NOT NULL, ProductID INTEGER NOT NULL,
                     ProductName TEXT NOT NULL, SKU TEXT NOT NULL, Quantity INTEGER NOT NULL, UnitPrice NUMERIC NOT NULL,
                     TotalPrice NUMERIC GENERATED ALWAYS AS (Quantity * UnitPrice) STORED);
+                CREATE TABLE InventoryTransactions (
+                    InventoryTransactionID INTEGER PRIMARY KEY AUTOINCREMENT, ProductID INTEGER NOT NULL,
+                    TransactionType TEXT NOT NULL, Quantity INTEGER NOT NULL, PreviousStock INTEGER NOT NULL,
+                    NewStock INTEGER NOT NULL, Note TEXT NULL, CreatedBy INTEGER NULL,
+                    CreatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
                 """);
             db.Addresses.AddRange(
                 new Address { AddressID = 11, UserID = 7, ReceiverName = "Receiver", ReceiverPhone = "0900", FullAddress = "1 Main" },

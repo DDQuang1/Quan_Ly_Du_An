@@ -1,4 +1,4 @@
-﻿using ECommerce.Api.Data;
+using ECommerce.Api.Data;
 using ECommerce.Api.DTOs.Admin;
 using ECommerce.Api.Domain;
 using ECommerce.Api.Entities;
@@ -113,7 +113,32 @@ public class AdminService : IAdminService
             if (order.PaymentMethod == OrderConstants.Cod)
                 order.PaymentStatus = OrderConstants.Paid;
         }
-        if (newStatus == "CANCELLED") order.CancelledAt = DateTime.UtcNow;
+        if (newStatus == "CANCELLED")
+        {
+            order.CancelledAt = DateTime.UtcNow;
+            foreach (var detail in order.OrderDetails)
+            {
+                var product = await _context.Products.SingleOrDefaultAsync(p => p.ProductID == detail.ProductID, cancellationToken);
+                if (product != null)
+                {
+                    var prevStock = product.StockQuantity;
+                    product.StockQuantity += detail.Quantity;
+                    product.UpdatedAt = DateTime.UtcNow;
+
+                    _context.InventoryTransactions.Add(new InventoryTransaction
+                    {
+                        ProductID = detail.ProductID,
+                        TransactionType = "CANCEL_ORDER",
+                        Quantity = detail.Quantity,
+                        PreviousStock = prevStock,
+                        NewStock = product.StockQuantity,
+                        Note = $"Admin cancel order #{order.OrderID}",
+                        CreatedBy = adminUserId,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+        }
 
         order.StatusHistories.Add(new OrderStatusHistory
         {

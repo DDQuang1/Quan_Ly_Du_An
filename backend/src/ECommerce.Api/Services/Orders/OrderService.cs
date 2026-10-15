@@ -153,6 +153,52 @@ public sealed class OrderService(AppDbContext context) : IOrderService
         return MapMockPayment(order);
     }
 
+    public async Task<OrderDetailDto> CancelOrderAsync(int userId, long orderId, CancellationToken ct = default)
+    {
+        await using var transaction = await context.Database.BeginTransactionAsync(ct);
+        var order = await context.Orders
+            .Include(x => x.OrderDetails)
+            .SingleOrDefaultAsync(x => x.OrderID == orderId && x.UserID == userId, ct)
+            ?? throw new ResourceNotFoundException();
+
+        if (order.OrderStatus == OrderConstants.Cancelled ||
+            order.OrderStatus is "COMPLETED" or "SHIPPING")
+        {
+            throw new DomainConflictException();
+        }
+
+        order.OrderStatus = OrderConstants.Cancelled;
+        order.CancelledAt = DateTime.UtcNow;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        foreach (var detail in order.OrderDetails)
+        {
+            var product = await context.Products.SingleOrDefaultAsync(p => p.ProductID == detail.ProductID, ct);
+            if (product != null)
+            {
+                var prevStock = product.StockQuantity;
+                product.StockQuantity += detail.Quantity;
+                product.UpdatedAt = DateTime.UtcNow;
+
+                context.InventoryTransactions.Add(new InventoryTransaction
+                {
+                    ProductID = detail.ProductID,
+                    TransactionType = "CANCEL_ORDER",
+                    Quantity = detail.Quantity,
+                    PreviousStock = prevStock,
+                    NewStock = product.StockQuantity,
+                    Note = $"Cancel order #{order.OrderID}",
+                    CreatedBy = userId,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        await context.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return MapDetail(order);
+    }
+
     private static void EnsureQrOrder(Order order)
     {
         if (order.PaymentMethod != OrderConstants.Qr)

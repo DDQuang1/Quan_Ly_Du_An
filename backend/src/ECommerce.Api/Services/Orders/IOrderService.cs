@@ -10,4 +10,5 @@ public interface IOrderService
     Task<OrderDetailDto> GetAsync(int userId, long orderId, CancellationToken ct = default);
     Task<MockPaymentDto> GetMockPaymentAsync(int userId, long orderId, CancellationToken ct = default);
     Task<MockPaymentDto> ConfirmMockPaymentAsync(int userId, long orderId, CancellationToken ct = default);
+    Task<OrderDetailDto> CancelOrderAsync(int userId, long orderId, CancellationToken ct = default);
 }

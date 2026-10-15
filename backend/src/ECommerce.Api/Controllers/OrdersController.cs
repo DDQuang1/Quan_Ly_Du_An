@@ -35,4 +35,8 @@ public sealed class OrdersController(IOrderService service) : ControllerBase
     [HttpPost("{id:long}/mock-payment/confirm")]
     public async Task<ActionResult<MockPaymentDto>> ConfirmMockPayment(long id, CancellationToken ct) =>
         Ok(await service.ConfirmMockPaymentAsync(User.GetRequiredUserId(), id, ct));
+
+    [HttpPost("{id:long}/cancel")]
+    public async Task<ActionResult<OrderDetailDto>> Cancel(long id, CancellationToken ct) =>
+        Ok(await service.CancelOrderAsync(User.GetRequiredUserId(), id, ct));
 }
